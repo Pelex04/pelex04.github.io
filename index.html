@@ -15,7 +15,7 @@
         body { 
             margin: 0; 
             padding: 0; 
-            background-color: #e0e0e0;
+            background-color: #f0f0f0;
             font-family: Arial, sans-serif;
             overflow: hidden;
         }
@@ -26,6 +26,16 @@
             position: fixed;
             top: 0;
             left: 0;
+            z-index: 1;
+        }
+        
+        /* Force Leaflet tiles to render */
+        .leaflet-tile-container {
+            transform: translate3d(0, 0, 0);
+        }
+        
+        .leaflet-tile {
+            transform: translate3d(0, 0, 0);
         }
         
         .loading {
@@ -34,45 +44,75 @@
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 1000;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             padding: 20px;
             border-radius: 8px;
             text-align: center;
             font-size: 16px;
             color: #333;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         
         .loading.hidden {
             display: none;
         }
+        
+        .debug-info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 200px;
+        }
     </style>
 </head>
 <body>
-    <div id="loading" class="loading">Loading Map...</div>
+    <div id="loading" class="loading">
+        <div>Loading Map...</div>
+        <div id="loading-progress" style="margin-top: 10px; font-size: 12px;"></div>
+    </div>
+    <div id="debug" class="debug-info">Initializing...</div>
     <div id="map"></div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         console.log('Script started');
         
+        let debugDiv = document.getElementById('debug');
+        let loadingDiv = document.getElementById('loading-progress');
+        
+        function updateDebug(message) {
+            console.log(message);
+            debugDiv.innerHTML = message;
+        }
+        
+        function updateLoading(message) {
+            loadingDiv.innerHTML = message;
+        }
+        
         // Wait for everything to load
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded');
-            initializeMap();
+            updateDebug('DOM loaded');
+            updateLoading('DOM Ready');
+            setTimeout(initializeMap, 100);
         });
         
         function initializeMap() {
             try {
-                console.log('Initializing map...');
+                updateDebug('Initializing map...');
+                updateLoading('Creating map...');
                 
                 // Check if Leaflet is loaded
                 if (typeof L === 'undefined') {
-                    console.error('Leaflet library not loaded');
-                    document.getElementById('loading').innerHTML = 'Error: Map library failed to load';
-                    return;
+                    throw new Error('Leaflet library not loaded');
                 }
                 
-                // Initialize the map
+                // Initialize the map with more explicit options
                 const map = L.map('map', {
                     center: [-15.7861, 35.0088],
                     zoom: 12,
@@ -80,27 +120,49 @@
                     scrollWheelZoom: true,
                     doubleClickZoom: true,
                     touchZoom: true,
-                    dragging: true
+                    dragging: true,
+                    preferCanvas: false,
+                    renderer: L.svg()
                 });
                 
-                console.log('Map object created');
+                updateDebug('Map object created');
+                updateLoading('Adding tiles...');
                 
-                // Add tile layer
-                const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                // Try CartoDB tile layer first (often works better in WebViews)
+                let tileLayer = L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png', {
                     maxZoom: 19,
-                    attribution: '© OpenStreetMap contributors',
-                    crossOrigin: true
+                    attribution: '© OpenStreetMap contributors, © CARTO',
+                    subdomains: 'abcd',
+                    className: 'webview-tile'
+                });
+                
+                tileLayer.on('load', function() {
+                    updateDebug('Tiles loaded successfully');
+                    updateLoading('Tiles loaded');
+                });
+                
+                tileLayer.on('tileerror', function(e) {
+                    updateDebug('Tile error: ' + e.error);
+                    // Fallback to OpenStreetMap
+                    map.removeLayer(tileLayer);
+                    const fallbackTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '© OpenStreetMap contributors'
+                    });
+                    fallbackTiles.addTo(map);
                 });
                 
                 tileLayer.addTo(map);
-                console.log('Tile layer added');
                 
-                // Create custom bin icon
-                const binIcon = L.icon({
-                    iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTMgNkg1SDhIMTZIMTlIMjFWOEgxOVYxOUMxOSAyMC4xIDAxOC4xIDIxIDE3IDIxSDdDNS45IDIxIDUgMjAuMSA1IDE5VjhIM1Y2WiIgZmlsbD0iIzRDQUY1MCIvPgo8cGF0aCBkPSJNOCAzVjVIMTZWM0g4WiIgZmlsbD0iIzRDQUY1MCIvPgo8L3N2Zz4K',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 24],
-                    popupAnchor: [0, -24]
+                updateDebug('Tile layer added');
+                updateLoading('Adding markers...');
+                
+                // Create simple marker icon
+                const binIcon = L.divIcon({
+                    html: '<div style="background: #4CAF50; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+                    className: 'custom-marker',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
                 });
                 
                 // Add waste bin markers
@@ -127,37 +189,53 @@
                     }
                 ];
                 
+                let markersAdded = 0;
                 wasteBins.forEach((bin, index) => {
                     const marker = L.marker(bin.coords, { icon: binIcon })
                         .bindPopup(`
-                            <div style="font-family: Arial, sans-serif;">
-                                <h3 style="margin: 0 0 8px 0; color: #2E7D32;">${bin.name}</h3>
-                                <p style="margin: 0; color: #666;">${bin.details}</p>
-                                <p style="margin: 8px 0 0 0; font-size: 12px; color: #888;">
-                                    Coordinates: ${bin.coords[0]}, ${bin.coords[1]}
+                            <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                                <h3 style="margin: 0 0 8px 0; color: #2E7D32; font-size: 14px;">${bin.name}</h3>
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">${bin.details}</p>
+                                <p style="margin: 0; font-size: 10px; color: #888;">
+                                    📍 ${bin.coords[0]}, ${bin.coords[1]}
                                 </p>
                             </div>
                         `)
                         .addTo(map);
                     
-                    console.log(`Added marker ${index + 1}`);
+                    markersAdded++;
+                    updateDebug(`Added marker ${markersAdded}/4`);
                 });
+                
+                updateLoading('Finalizing...');
                 
                 // Hide loading indicator
                 document.getElementById('loading').classList.add('hidden');
                 
-                // Invalidate size to ensure proper rendering
-                setTimeout(() => {
-                    map.invalidateSize();
-                    console.log('Map size invalidated');
-                }, 100);
+                // Multiple attempts to invalidate size
+                const invalidateMap = () => {
+                    map.invalidateSize(true);
+                    map._resetView(map.getCenter(), map.getZoom(), true);
+                };
+                
+                setTimeout(invalidateMap, 100);
+                setTimeout(invalidateMap, 500);
+                setTimeout(invalidateMap, 1000);
                 
                 // Make map globally accessible
                 window.map = map;
+                
+                updateDebug('Map ready ✓');
                 console.log('Map initialization complete');
+                
+                // Hide debug info after 3 seconds
+                setTimeout(() => {
+                    debugDiv.style.display = 'none';
+                }, 3000);
                 
             } catch (error) {
                 console.error('Error initializing map:', error);
+                updateDebug('Error: ' + error.message);
                 document.getElementById('loading').innerHTML = 'Error loading map: ' + error.message;
             }
         }
@@ -166,16 +244,17 @@
         window.addEventListener('resize', function() {
             if (window.map) {
                 setTimeout(() => {
-                    window.map.invalidateSize();
+                    window.map.invalidateSize(true);
+                    updateDebug('Map resized');
                 }, 100);
             }
         });
         
-        // Fallback initialization
+        // Additional fallback
         window.addEventListener('load', function() {
             setTimeout(() => {
                 if (!window.map) {
-                    console.log('Fallback initialization');
+                    updateDebug('Fallback init');
                     initializeMap();
                 }
             }, 1000);
